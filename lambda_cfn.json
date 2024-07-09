@@ -1,0 +1,236 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "clusterName": {
+      "Type": "String",
+      "Default": "ecs-demo-cluster"
+    },
+    "serviceName": {
+      "Type": "String",
+      "Default": "ecs-demo-service"
+    }
+  },
+  "Transform": "AWS::Serverless-2016-10-31",
+  "Resources": {
+    "EcsAlarmHandler": {
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "FunctionName": "ecs_alarm_handler",
+        "CodeUri": "s3://lambda-jia/ecs_alarm_handler.py.zip",
+        "Handler": "ecs_alarm_handler.lambda_handler",
+        "Runtime": "python3.12",
+        "MemorySize": 128,
+        "Environment": {
+          "Variables": {
+            "JAVA_TOOL_OPTIONS": "--add-opens=java.management/sun.management=ALL-UNNAMED"
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "ExecutionLambdaRole",
+            "Arn"
+          ]
+        },
+        "Timeout": 120,
+        "Events": {
+          "MySamEvent": {
+            "Type": "EventBridgeRule",
+            "Properties": {
+              "Pattern": {
+                "Fn::Sub": "{\"source\":[\"aws.ecs\"],\"detail-type\":[\"ECS Task State Change\"],\"detail\":{\"containers\":{\"containerArn\":[{\"wildcard\":\"arn:aws:ecs:*${clusterName}*\"}]},\"group\":[\"service:${serviceName}\"],\"lastStatus\":[\"PROVISIONING\",\"DEPROVISIONING\"]}}"
+              },
+              "RuleName": "EcsTaskStateChange",
+              "Target": {
+                "Id": "EcsTaskStateChange"
+              }
+            }
+          }
+        }
+      }
+    },
+    "ExecutionLambdaRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "lambda.amazonaws.com"
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "AWSLambdaCloudWatch",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": "arn:aws:logs:*:*:*"
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "AWSLambdaPermissions",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudwatch:PutMetricAlarm",
+                    "cloudwatch:DeleteAlarms"
+                  ],
+                  "Resource": "arn:aws:cloudwatch:*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:RemovePermission",
+                    "lambda:AddPermission"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "EventBridgeLambdaInvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "EcsAlarmHandler"
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "events.amazonaws.com"
+      }
+    },
+    "CloseUnhealthyTaskHandler": {
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "FunctionName": "close_unhealthy_task",
+        "CodeUri": "s3://lambda-jia/close_unhealthy_task.py.zip",
+        "Handler": "close_unhealthy_task.lambda_handler",
+        "Runtime": "python3.12",
+        "MemorySize": 128,
+        "Environment": {
+          "Variables": {
+            "JAVA_TOOL_OPTIONS": "--add-opens=java.management/sun.management=ALL-UNNAMED"
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "CloseUnhealthyTaskExecutionLambdaRole",
+            "Arn"
+          ]
+        },
+        "Timeout": 120
+      }
+    },
+    "CloseUnhealthyTaskExecutionLambdaRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "sts:AssumeRole"
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "lambda.amazonaws.com"
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "AWSLambdaCloudWatch",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": "arn:aws:logs:*:*:*"
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "StopTask",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:StopTask"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task/${clusterName}/*"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "ListTasks",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:ListTasks"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:container-instance/${clusterName}/*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "CloseUnhealthyTaskLambdaInvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "CloseUnhealthyTaskHandler"
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "ecs-tasks.amazonaws.com"
+      }
+    }
+  }
+}

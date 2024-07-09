@@ -144,5 +144,3 @@ Configuration -> Permissions -> Resource-based policy statements -> add permissi
 
 ![img_29.png](picture/img_29.png)
 ![img_30.png](picture/img_30.png)
-
-## cloudformation under construction 
